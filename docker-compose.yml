@@ -1,0 +1,147 @@
+version: '3'
+
+x-json-service: &json-service # common settings for all json services
+
+  image: edis-node:round-6
+  build:
+    dockerfile: ./dockerfiles/node.Dockerfile
+  profiles: 
+    - json-cluster
+  volumes:
+    - ./data:/home/data
+
+x-mongo-service: &mongo-service # common settings for all mongo services
+
+    image: mongo:6.0
+    profiles:
+      - mongo-cluster
+    working_dir: /scripts
+    volumes:
+      - ./scripts:/scripts
+
+services:
+
+  # ------------------------------------------------------------------------- #   
+  # Application                                                               #
+  # ------------------------------------------------------------------------- # 
+  # - docker compose run --rm app                 # for running your code     #
+  # - docker compose run --rm app python main.py  # (the same)                #
+  # - docker compose run --rm app bash            # for running shell         #
+  # ------------------------------------------------------------------------- # 
+
+  app:
+
+    image: edis-python:round-6
+    build:
+      dockerfile: ./dockerfiles/python.Dockerfile
+    command: python main.py
+    volumes:
+      - ./app:/home/app
+    profiles:
+      - do-not-start-by-default
+
+  # ------------------------------------------------------------------------- #   
+  # Cluster of JSON Servers                                                   #
+  # ------------------------------------------------------------------------- # 
+  # - docker compose --profile json-cluster up                                #
+  # - docker compose --profile json-cluster down                              #
+  # ------------------------------------------------------------------------- # 
+
+  shard0:
+    <<: *json-service
+    command: "json-server -H 0.0.0.0 -p 4000 -d 500 -w /home/data/films0.json"
+
+  shard1:
+    <<: *json-service
+    command: "json-server -H 0.0.0.0 -p 4000 -d 500 -w /home/data/films1.json"
+
+  shard2:
+    <<: *json-service
+    command: "json-server -H 0.0.0.0 -p 4000 -d 500 -w /home/data/films2.json"
+
+  # ------------------------------------------------------------------------- #   
+  # Cluster of MongoDB Servers                                                #
+  # ------------------------------------------------------------------------- # 
+  # - docker compose --profile mongo-cluster up                               #
+  # - docker compose --profile mongo-cluster down                             #
+  # ------------------------------------------------------------------------- # 
+
+  # Ref. https://github.com/minhhungit/mongodb-cluster-docker-compose
+  # (here refactored and slightly edited)
+
+  # ------------------------------------------------------------------------- #   
+  # Routers
+  # - Services (nodes): router01, router02
+  #
+
+  router01: &router
+    <<: *mongo-service 
+    command: mongos --port 27017 --configdb rs-config-server/configsvr01:27017,configsvr02:27017,configsvr03:27017 --bind_ip_all
+
+  router02:
+    <<: *router 
+
+  # ------------------------------------------------------------------------- #   
+  # Config Servers
+  # - Replication set: rs-config-server
+  # - Services (nodes): configsvr01, configsvr02, configsvr03
+  #
+
+  configsvr01: &rs-config-server
+    <<: *mongo-service 
+    command: mongod --port 27017 --configsvr --replSet rs-config-server
+
+  configsvr02:
+    <<: *rs-config-server 
+
+  configsvr03:
+    <<: *rs-config-server
+
+  # ------------------------------------------------------------------------- #   
+  # Shards
+  #
+
+  # Shards 01
+  # ---------
+  # - Replication set: rs-shard-01 
+  # - Services (nodes): shard01-a, shard01-b, shard01-c
+
+  shard01-a: &rs-shard-01
+    <<: *mongo-service 
+    command: mongod --port 27017 --shardsvr --replSet rs-shard-01
+  
+  shard01-b:
+    <<: *rs-shard-01 
+  
+  shard01-c:
+    <<: *rs-shard-01 
+
+  # Shards 02
+  # ---------
+  # - Replication set: rs-shard-02 
+  # - Services (nodes): shard02-a, shard02-b, shard02-c
+
+  shard02-a: &rs-shard-02
+    <<: *mongo-service 
+    command: mongod --port 27017 --shardsvr --replSet rs-shard-02
+  
+  shard02-b:
+    <<: *rs-shard-02 
+
+  shard02-c:
+    <<: *rs-shard-02 
+
+  # Shards 03
+  # ---------
+  # - Replication set: rs-shard-03 
+  # - Services (nodes): shard03-a, shard03-b, shard03-c
+
+  shard03-a: &rs-shard-03
+    <<: *mongo-service 
+    command: mongod --port 27017 --shardsvr --replSet rs-shard-03
+
+  shard03-b:
+    <<: *rs-shard-03 
+
+  shard03-c:
+    <<: *rs-shard-03 
